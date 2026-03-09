@@ -116,6 +116,7 @@ def launch_sglang_server(
             [
                 "--speculative-algorithm",
                 "EAGLE3",
+                "--disable-cuda-graph",
                 "--speculative-num-steps",
                 str(steps),
                 "--speculative-eagle-topk",
@@ -200,6 +201,8 @@ def main():
         benchmark_list.append((bench_name, num_prompts, subset))
     assert len(benchmark_list) != 0, "the number of benchmark list is 0"
 
+    print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>000")
+
     base_url = f"http://localhost:{args.port}"
     results = {}
 
@@ -237,6 +240,8 @@ def main():
     else:
         # we itearate over each config from args
         for batch_size, steps, topk, num_draft_tokens in configs:
+            print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>A")
+            print(f"batch_size={batch_size}, steps={steps}, topk={topk}, num_draft_tokens={num_draft_tokens}")
             process = launch_sglang_server(
                 server_args,
                 base_url,
@@ -246,7 +251,9 @@ def main():
                 num_draft_tokens,
                 args.timeout_for_server_launch,
             )
+            print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>B")
             wait_for_server(base_url)
+            print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>C")
             run_benchmarks(batch_size, steps, topk, num_draft_tokens)
             kill_process_tree(process.pid)
             process.wait()

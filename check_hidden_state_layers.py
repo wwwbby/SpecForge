@@ -1,14 +1,9 @@
 """
-This script will generate the hidden states for the dataset use transformer as the target model backend.
-By generating hidden states in advance, we can avoid:
-- the memory overhead of loading target model
-- the latency overhead of generating hidden states for each request.
-
-Optimized for lower memory usage and higher efficiency.
+This script will generate the hidden states for the dataset use transformer as the target model backend and test hidden state
 
 Usage:
 torchrun --nproc_per_node=8 \
-    scripts/prepare_hidden_states.py \
+    check_hidden_state_layers.py \
     --target-model-path meta-llama/Llama-3.1-8B-Instruct \
     --enable-aux-hidden-states \
     --data-path ./cache/dataset/sharegpt_train.jsonl \
@@ -22,7 +17,7 @@ torchrun --nproc_per_node=8 \
 
 For pre-formatted data (with chat template already applied), add --is-preformatted:
 torchrun --nproc_per_node=8 \
-    scripts/prepare_hidden_states.py \
+    check_hidden_state_layers.py \
     --target-model-path meta-llama/Llama-3.1-8B-Instruct \
     --enable-aux-hidden-states \
     --data-path ./cache/dataset/preformatted_data.jsonl \
@@ -56,9 +51,10 @@ from specforge.distributed import (
     init_distributed,
     is_tp_rank_0,
 )
-from specforge.modeling.target import Eagle3TargetModel, get_eagle3_target_model
+from specforge.modeling.target import Eagle3TargetModel, SGLangOmniEagle3TargetModel, get_eagle3_target_model
 from specforge.utils import print_with_rank, rank_0_priority
 
+HIDDEN_STATE_SIZE = 2048
 
 @dataclass
 class DataPoint:
@@ -173,6 +169,7 @@ def build_target_model(
             .cuda()
         )
     else:
+        SGLangOmniEagle3TargetModel._extend = SGLangOmniEagle3TargetModel._extend_with_test
         target_model_kwargs = SGLangBackendArgs.from_args(args).to_kwargs()
         target_model = get_eagle3_target_model(
             pretrained_model_name_or_path=args.target_model_path,
@@ -207,7 +204,7 @@ def log_verification_samples(output_data, tokenizer, print_fn):
     """
     # 1. 解码 Input Text
     input_text = tokenizer.decode(output_data.input_ids[0], skip_special_tokens=False)
-    
+
     # 2. 将 Logits 还原为模型预测的 Token IDs (取出 target 的 argmax)
     # output_data.target 维度为 [Batch, Seq_Len, Vocab_Size]
     predicted_ids = torch.argmax(output_data.target[0], dim=-1)
@@ -576,7 +573,6 @@ class HiddenStatesGenerator:
                 f"\nGeneration loop finished. Processed: {total_processed}, Skipped: {total_skipped}"
             )
         dist.barrier()
-
 
 def main():
     args = parse_args()

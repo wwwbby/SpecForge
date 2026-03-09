@@ -7,7 +7,16 @@ from torch.nn.attention.flex_attention import (
 )
 from transformers.utils import is_torchdynamo_compiling
 
-dynamo.config.recompile_limit = 64
+# dynamo.config.recompile_limit = 64
+
+# 针对 PyTorch 2.6.0+ 的适配修改
+if hasattr(dynamo.config, "cache_size_limit"):
+    dynamo.config.cache_size_limit = 64
+elif hasattr(dynamo.config, "recompile_limit"):
+    dynamo.config.recompile_limit = 64
+else:
+    # 如果两个属性都没有（某些精简版 torch），则忽略
+    pass
 
 
 # Reference Implementation https://github.com/huggingface/transformers/blob/main/src/transformers/integrations/flex_attention.py

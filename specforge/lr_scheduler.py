@@ -1,6 +1,6 @@
 from warnings import warn
 
-from torch.optim.lr_scheduler import CosineAnnealingLR as _CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR as _CosineAnnealingLR, LinearLR
 from torch.optim.lr_scheduler import LRScheduler as _LRScheduler
 
 
@@ -257,4 +257,44 @@ class CosineAnnealingWarmupLR(WarmupScheduler):
             eta_min=eta_min,
             last_epoch=last_epoch,
         )
+        super().__init__(optimizer, warmup_steps, base_scheduler, last_epoch=last_epoch)
+
+
+class LinearWarmupLR(WarmupScheduler):
+    """Linear warmup followed by linear decay learning rate scheduler.
+
+    Args:
+        optimizer: Wrapped optimizer.
+        total_steps (int): Total number of training steps.
+        warmup_steps (int): Steps for linear warmup.
+        eta_min (float): Minimum learning rate at the end of decay.
+        last_epoch (int): The index of last epoch, defaults to -1.
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        total_steps: int,
+        warmup_steps: int = 0,
+        eta_min: float = 0.0,
+        last_epoch: int = -1,
+    ):
+        # 计算衰减阶段的总步数
+        decay_steps = total_steps - warmup_steps
+
+        # 这里的 base_scheduler 负责 warmup 之后的衰减部分
+        # start_factor=1.0 表示从初始学习率开始衰减
+        # end_factor 设为 eta_min / base_lr
+        # 注意：LinearLR 的 end_factor 是相对于初始学习率的倍数
+        base_lr = optimizer.param_groups[0]['lr']
+        end_factor = eta_min / base_lr if base_lr != 0 else 0
+
+        base_scheduler = LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=end_factor,
+            total_iters=decay_steps,
+            last_epoch=last_epoch
+        )
+
         super().__init__(optimizer, warmup_steps, base_scheduler, last_epoch=last_epoch)

@@ -1,6 +1,6 @@
 import torch
 
-from specforge.lr_scheduler import CosineAnnealingWarmupLR
+from specforge.lr_scheduler import CosineAnnealingWarmupLR, LinearWarmupLR
 from specforge.utils import print_on_rank0
 
 
@@ -29,11 +29,17 @@ class BF16Optimizer:
         self.optimizer = torch.optim.AdamW(
             self.fp32_params, lr=lr, weight_decay=weight_decay
         )
+
         self.scheduler = CosineAnnealingWarmupLR(
             self.optimizer,
             total_steps=total_steps,
             warmup_steps=int(warmup_ratio * total_steps),
         )
+        # self.scheduler = LinearWarmupLR(
+        #     self.optimizer,
+        #     total_steps=total_steps,
+        #     warmup_steps=int(warmup_ratio * total_steps)
+        # )
 
     def step(self):
         with torch.no_grad():

@@ -77,20 +77,26 @@ def print_on_rank0(message):
 
 
 def get_last_checkpoint(folder, prefix="epoch"):
+    if not os.path.exists(folder):
+        return None
+
     content = os.listdir(folder)
-    _re_checkpoint = re.compile(r"^" + prefix + r"_(\d+)$")
-    checkpoints = [
-        path
-        for path in content
-        if _re_checkpoint.search(path) is not None
-        and os.path.isdir(os.path.join(folder, path))
-    ]
-    if len(checkpoints) == 0:
-        return
-    return os.path.join(
-        folder,
-        max(checkpoints, key=lambda x: int(_re_checkpoint.search(x).groups()[0])),
-    )
+    pattern = re.compile(prefix + r"_(\d+)_step_(\d+)")
+    valid_checkpoints = []
+
+    for path in content:
+        match = pattern.search(path)
+        if match and os.path.isdir(os.path.join(folder, path)):
+            epoch_val = int(match.group(1))
+            step_val = int(match.group(2))
+            valid_checkpoints.append(((epoch_val, step_val), path))
+
+    if not valid_checkpoints:
+        return None
+
+    best_checkpoint = max(valid_checkpoints, key=lambda x: x[0])
+
+    return os.path.join(folder, best_checkpoint[1])
 
 
 def generate_draft_model_config(

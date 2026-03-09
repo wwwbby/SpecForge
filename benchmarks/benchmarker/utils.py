@@ -16,6 +16,7 @@ class BenchmarkMetrics:
     latency: float
     output_throughput: float
     accept_length: float
+    first_hit_rate: float
     accuracy: Optional[float] = None
     num_questions: int = 0
     num_valid_predictions: int = 0
@@ -58,27 +59,38 @@ def compute_metrics(
     has_verify = "spec_verify_ct" in states[0].get_meta_info(answer_key)
     if has_verify:
         num_verify_tokens = 0
+        num_first_hits = 0
         if additional_answer_keys:
             for key in [answer_key] + additional_answer_keys:
                 num_verify_tokens += sum(
                     s.get_meta_info(key).get("spec_verify_ct", 0) for s in states
                 )
+                num_first_hits += sum(
+                    s.get_meta_info(key).get("spec_first_hits", 0) for s in states
+                )
         else:
             num_verify_tokens = sum(
                 s.get_meta_info(answer_key).get("spec_verify_ct", 0) for s in states
             )
+            num_first_hits += sum(
+                s.get_meta_info(answer_key).get("spec_first_hits", 0) for s in states
+            )
 
         if num_verify_tokens == 0:
             accept_length = 1.0
+            first_hit_rate = 0.0
         else:
             accept_length = num_output_tokens / num_verify_tokens
+            first_hit_rate = num_first_hits / num_output_tokens
     else:
         accept_length = 1.0
+        first_hit_rate = 0.0
 
     return BenchmarkMetrics(
         latency=latency,
         output_throughput=output_throughput,
         accept_length=accept_length,
+        first_hit_rate=first_hit_rate,
         num_questions=len(states),
     )
 

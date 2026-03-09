@@ -14,8 +14,8 @@ from .utils import create_multi_turn_sgl_function
 SYSTEM_PROMPT = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
 
 
-@BENCHMARKS.register("mtbench")
-class MTBenchBenchmarker(Benchmarker):
+@BENCHMARKS.register("cn100")
+class CN100Benchmarker(Benchmarker):
     """MT-Bench benchmark implementation."""
 
     def __init__(
@@ -34,9 +34,10 @@ class MTBenchBenchmarker(Benchmarker):
         questions_data = questions_data
 
         questions = [
-            {"question_1": q["turns"][0], "question_2": q["turns"][1]}
+            {"question_1": q["turns"][0]}
             for q in questions_data
         ]
+
         # MT-Bench doesn't have labels for accuracy computation
         labels = [None] * len(questions)
 
@@ -50,10 +51,10 @@ class MTBenchBenchmarker(Benchmarker):
         return create_multi_turn_sgl_function(
             function_name="answer_mt_bench",
             system_prompt=SYSTEM_PROMPT,
-            num_turns=2,
+            num_turns=1,
             max_tokens=self.get_max_new_tokens(),
         )
 
     def get_answer_keys(self) -> List[str]:
         """Return answer keys for multi-turn conversation."""
-        return ["answer_1", "answer_2"]
+        return ["answer_1"]

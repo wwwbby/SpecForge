@@ -103,7 +103,7 @@ class Benchmarker(ABC):
         Returns:
             Maximum tokens (default: 2048)
         """
-        return 2048
+        return 1024
 
     def run(
         self,

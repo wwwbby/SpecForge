@@ -129,6 +129,138 @@ class DataCollatorWithPadding:
         return batch
 
 
+class AudioDataCollatorWithPadding:
+    """
+    Datacollator that will dynamically pad the inputs for batching.
+    """
+
+    def __init__(self):
+        self.sp_degree = torch.distributed.get_world_size(get_draft_sp_group())
+
+    def paddingtensor(self, intensors: torch.Tensor, N: int) -> torch.Tensor:
+        """
+        Pad to the longest sequence in the batch.
+
+        Args:
+            intensors: (B, n, S)
+            N: the length to pad to, N >= n
+
+        Returns:
+            outtensors: (B, N, S)
+        """
+        B, n, S = intensors.shape
+        padding_tensor = torch.zeros(
+            B, N - n, S, dtype=intensors.dtype, device=intensors.device
+        )
+        outtensors = torch.cat((intensors, padding_tensor), dim=1)
+        return outtensors
+
+    def paddingtensor2D(self, intensors: torch.Tensor, N: int) -> torch.Tensor:
+        """
+        Pad 2D tensor to the longest sequence in the batch.
+
+        Args:
+            intensors: (B, n)
+            N: the length to pad to, N >= n
+
+        Returns:
+            outtensors: (B, N)
+        """
+        B, n = intensors.shape
+        padding_tensor = torch.zeros(
+            B, N - n, dtype=intensors.dtype, device=intensors.device
+        )
+        outtensors = torch.cat((intensors, padding_tensor), dim=1)
+        return outtensors
+
+    def paddingtensor3D_last_dim(self, intensors: torch.Tensor, N: int) -> torch.Tensor:
+        """
+        将 3D tensor 的最后一维填充到长度 N。
+
+        Args:
+            intensors: (B, L, n)  例如 (1, 128, 12)
+            N: 目标填充长度 (N >= n)
+
+        Returns:
+            outtensors: (B, L, N)
+        """
+        B, L, n = intensors.shape
+
+        if n >= N:
+            return intensors
+
+        padding_tensor = torch.zeros(
+            B, L, N - n, dtype=intensors.dtype, device=intensors.device
+        )
+
+        outtensors = torch.cat((intensors, padding_tensor), dim=2)
+
+        return outtensors
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Collate a batch of features.
+
+        Args:
+            features: A list of features, where each feature is a dictionary containing:
+                - input_ids: torch.Tensor of shape (n,)
+                - attention_mask: torch.Tensor of shape (n,)
+                - loss_mask: torch.Tensor of shape (n,)
+
+        Returns:
+            A dictionary containing:
+                - input_ids: torch.Tensor of shape (B, N)
+                - attention_mask: torch.Tensor of shape (B, N)
+                - loss_mask: torch.Tensor of shape (B, N)
+        """
+        max_length = max(item["input_ids"].shape[1] for item in features)
+        # pad for sequence parrel
+        max_length = (
+            (max_length + self.sp_degree - 1) // self.sp_degree
+        ) * self.sp_degree
+        batch_input_ids = torch.cat(
+            [self.paddingtensor2D(item["input_ids"], max_length) for item in features]
+        )
+        batch_attention_mask = torch.cat(
+            [
+                self.paddingtensor2D(item["attention_mask"], max_length)
+                for item in features
+            ]
+        )
+        batch_loss_mask = torch.cat(
+            [self.paddingtensor2D(item["loss_mask"], max_length) for item in features]
+        )
+        batch_input_features = torch.cat(
+            [self.paddingtensor3D_last_dim(item["input_features"], max_length) for item in features]
+        )
+        batch_feature_attention_mask = torch.cat(
+            [self.paddingtensor2D(item["feature_attention_mask"], max_length) for item in features]
+        )
+        batch = {
+            "input_ids": batch_input_ids,
+            "attention_mask": batch_attention_mask,
+            "loss_mask": batch_loss_mask,
+            "hidden_state": None,
+            "target": None,
+            "input_features": batch_input_features,
+            "feature_attention_mask": batch_feature_attention_mask
+        }
+        if all("hidden_state" in item for item in features):
+            assert all(
+                "target" in item for item in features
+            ), "target is required when hidden_state is provided"
+            batch["hidden_state"] = torch.cat(
+                [
+                    self.paddingtensor(item["hidden_state"], max_length)
+                    for item in features
+                ]
+            )
+            batch["target"] = torch.cat(
+                [self.paddingtensor(item["target"], max_length) for item in features]
+            )
+        return batch
+
+
 class VlmDataCollatorWithPadding:
     """
     Datacollator that will dynamically pad the inputs for batching.
@@ -237,6 +369,7 @@ def prepare_dp_dataloaders(
     shuffle: Optional[bool] = False,
     is_vlm: Optional[bool] = False,
     prefetch_factor: Optional[int] = 2,
+    is_audio: Optional[bool] = False,
     **dataloader_kwargs,
 ) -> DataLoader:
     """
@@ -262,6 +395,8 @@ def prepare_dp_dataloaders(
     )
     if is_vlm:
         datacollator_cls = VlmDataCollatorWithPadding
+    elif is_audio:
+        datacollator_cls = AudioDataCollatorWithPadding
     else:
         datacollator_cls = DataCollatorWithPadding
 
