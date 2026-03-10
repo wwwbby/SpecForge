@@ -3,6 +3,7 @@ import hashlib
 import math
 import os
 import time
+import json
 from argparse import ArgumentParser, Namespace
 from typing import List, Optional, Tuple, Union
 
@@ -173,7 +174,7 @@ def parse_args() -> Tuple[ArgumentParser, Namespace]:
     optimization_group.add_argument(
         "--attention-backend",
         type=str,
-        default="flex_attention",
+        default="sdpa",
         help="The attention backend for the draft model",
     )
 
@@ -282,7 +283,7 @@ def build_target_model(
                 pretrained_model_name_or_path=args.target_model_path,
                 backend=args.target_model_backend,
                 torch_dtype=torch.bfloat16,
-                device="cuda",
+                device="npu",
                 cache_dir=args.model_download_dir,
                 **target_model_kwargs,
                 trust_remote_code=args.trust_remote_code,
@@ -461,7 +462,7 @@ def build_dataloaders(
                 num_proc=args.build_dataset_num_proc,
                 is_preformatted=args.is_preformatted,
             )
-        elif args.eval_hidden_states_path is not None:
+        if args.eval_hidden_states_path is not None:
             eval_eagle3_dataset = build_offline_eagle3_dataset(
                 args.eval_hidden_states_path,
                 args.max_length,
@@ -820,13 +821,21 @@ def main():
                         "time": f"{time_per_step:.2f}s",
                     }
                 )
+                log_entry = {
+                    "step": global_step,
+                    "loss": f"{avg_loss:.2f}",
+                    "acc": f"{avg_acc:.2f}",
+                    "time": f"{time_per_step:.2f}s"
+                }
+                with open(f"{args.output_dir}/train_log.jsonl", "a") as f:
+                    f.write(json.dumps(log_entry) + "\n")
 
             # ================================================
             # 7.2 Evaluation Step
             # ================================================
             if (
                 args.eval_data_path is not None
-                and global_step % args.eval_interval == 0
+                and (global_step == 1 or global_step % args.eval_interval == 0)
             ):
                 # Run evaluation
                 draft_model.eval()
@@ -861,7 +870,7 @@ def main():
             # ================================================
             # 7.3 Save Checkpoints
             # ================================================
-            if global_step % args.save_interval == 0:
+            if global_step == 1 or global_step % args.save_interval == 0:
                 # Save the model
                 save_checkpoints(args, epoch, global_step, eagle3_model, optimizer)
 

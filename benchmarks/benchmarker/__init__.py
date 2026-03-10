@@ -11,6 +11,8 @@ from .mmstar import MMStarBenchmarker
 from .mtbench import MTBenchBenchmarker
 from .registry import BENCHMARKS
 from .simpleqa import SimpleQABenchmarker
+from .cn100 import CN100Benchmarker
+from .omni_speech import QwenOmniAuditBenchmarker
 
 __all__ = [
     "BENCHMARKS",
@@ -26,4 +28,6 @@ __all__ = [
     "MMLUBenchmarker",
     "LCBBenchmarker",
     "SimpleQABenchmarker",
+    "CN100Benchmarker",
+    "QwenOmniAuditBenchmarker"
 ]

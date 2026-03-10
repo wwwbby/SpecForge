@@ -24,13 +24,21 @@ import os
 import re
 import warnings
 from collections import Counter
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 
 import torch
 from tqdm import tqdm
 from transformers import ImageProcessingMixin, PreTrainedTokenizer
 
 from datasets import Dataset as HFDataset
+import librosa
+import numpy as np
+
+from specforge.data.omni_template import omni_template
+
+
+SAMPLE_RATE=16000
+
 
 try:
     from qwen_vl_utils import process_vision_info
@@ -47,7 +55,6 @@ from .template import TEMPLATE_REGISTRY, ChatTemplate
 
 # define a type called conversation
 Conversation = List[Dict[str, str]]
-
 
 # ==============================
 # This file is for preprocessing the data
@@ -282,6 +289,74 @@ def preprocess_vlm_conversations(
     return results
 
 
+def preprocess_audio_conversations(
+    processor: Any,
+    conversations: List[List[Dict]],
+    audio_waveforms: List[Optional[np.ndarray]],
+    max_length: int = 2048,
+) -> Dict[str, List[torch.Tensor]]:
+    results = {
+        "input_ids": [],
+        "loss_mask": [],
+        "attention_mask": [],
+        "input_features": [],
+        "feature_attention_mask": []
+    }
+
+    tokenizer = processor.tokenizer
+    IM_START_ID = tokenizer.convert_tokens_to_ids("<|im_start|>")
+    IM_END_ID = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    ASSISTANT_ID = tokenizer.convert_tokens_to_ids("assistant")
+
+    for i, (conv, waveform) in enumerate(zip(conversations, audio_waveforms)):
+        if not conv:
+            continue
+
+        text = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+        audio_kwargs = {}
+        audio_kwargs.setdefault("truncation", False)
+
+        processor.tokenizer.chat_template = omni_template
+        if hasattr(processor, 'chat_template'):
+            processor.chat_template = omni_template
+
+        inputs = processor(
+            text=text,
+            audio=[waveform],
+            audio_kwargs=audio_kwargs,
+            device="npu",
+            sampling_rate=SAMPLE_RATE,
+            return_tensors="pt",
+            padding="max_length",
+            max_length=max_length
+        )
+
+        input_ids = inputs.get("input_ids", None)
+        attention_mask = inputs.get("attention_mask", None)
+        input_features = inputs.get("input_features", None)
+        feature_attention_mask = inputs.get("feature_attention_mask", None)
+
+        curr_input_ids = input_ids[0]  # input_ids shape [1, seq_len]
+        loss_mask = torch.zeros_like(curr_input_ids)
+        for idx in range(len(curr_input_ids) - 2):
+            if curr_input_ids[idx] == IM_START_ID and curr_input_ids[idx + 1] == ASSISTANT_ID:
+                s_ptr = idx + 3  # ����ǰ׺, <|im_start|>,assistant,\n
+                e_ptr = s_ptr
+                for j in range(s_ptr, len(curr_input_ids)):
+                    if curr_input_ids[j] == IM_END_ID:
+                        e_ptr = j
+                        break
+                loss_mask[s_ptr:e_ptr] = 1
+
+        results["input_ids"].append(input_ids)
+        results["loss_mask"].append(loss_mask[None, :])
+        results["attention_mask"].append(attention_mask)
+        results["input_features"].append(input_features)
+        results["feature_attention_mask"].append(feature_attention_mask)
+
+    return results
+
+
 def build_eagle3_dataset(
     dataset: HFDataset,
     tokenizer: PreTrainedTokenizer,
@@ -292,8 +367,10 @@ def build_eagle3_dataset(
     cache_dir: Optional[str] = None,
     cache_key: Optional[str] = None,
     is_vlm: Optional[bool] = False,
+    is_audio: Optional[bool] = False,
     processor: Optional[ImageProcessingMixin] = None,
     is_preformatted: Optional[bool] = False,
+    audio_root: Optional[str] = None,
 ) -> HFDataset:
     """
     build eagle3 dataset
@@ -323,6 +400,9 @@ def build_eagle3_dataset(
     Returns:
         The processed HF dataset.
     """
+    if is_audio:
+        assert processor is not None and audio_root is not None
+
     if is_vlm:
         assert processor is not None, "processor must be provided when is_vlm is True"
 
@@ -336,12 +416,39 @@ def build_eagle3_dataset(
 
     template: ChatTemplate = TEMPLATE_REGISTRY.get(chat_template)
 
-    dataset = dataset.shuffle(seed=shuffle_seed)
+    # dataset = dataset.shuffle(seed=shuffle_seed)
     original_cols = dataset.column_names
 
     def preprocess_function(examples):
-        # Handle different dataset formats
-        if is_vlm:
+        if is_audio:
+            all_waveforms = []
+            for conv in examples["conversations"]:
+                speech = None
+                try:
+                    assert conv[0]["role"] == "user"
+                    assert conv[1]["role"] == "assistant"
+                except AssertionError:
+                    continue
+                for msg in conv[0]["content"]:
+                    if msg["type"] == "audio":
+                        audio_file = msg["audio"]
+                        path = os.path.join(audio_root, audio_file)
+                        msg["audio"] = f"file://{path}"
+                        speech, _ = librosa.load(path, sr=SAMPLE_RATE)
+                        del msg["text"]
+                    elif msg["type"] == "text":
+                        del msg["audio"]
+                del conv[1]["content"][0]["audio"]
+
+                all_waveforms.append(speech)
+
+            return preprocess_audio_conversations(
+                processor=processor,
+                conversations=examples["conversations"],
+                audio_waveforms=all_waveforms,
+                max_length=max_length,
+            )
+        elif is_vlm:
             processed = preprocess_vlm_conversations(
                 processor,
                 examples,
@@ -397,7 +504,7 @@ def build_eagle3_dataset(
         )
 
     # adjust batch size based on dataset type
-    if is_vlm:
+    if is_vlm or is_audio:
         batch_size = (
             200  # reduce batch size for VLM datasets to avoid PyArrow offset overflow
         )
